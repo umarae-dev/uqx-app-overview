@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- EncryptedSharedPreferences depend on Android Keystore keys that are
+             not portable across restore. Exclude both auth and wallet blobs. -->
+        <exclude domain="sharedpref" path="umarae_auth_prefs.xml" />
+        <exclude domain="sharedpref" path="uqx_wallet_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="umarae_auth_prefs.xml" />
+        <exclude domain="sharedpref" path="uqx_wallet_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
