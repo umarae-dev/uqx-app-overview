@@ -1,333 +1,149 @@
-# UQX — Native Android Rewards & Self-Custody Wallet App
+# UQX — Native Android Rewards & Self-Custody Wallet
 
-> **A BNB Smart Chain-first Android ecosystem combining engagement rewards, referral growth, account balances and a real on-device self-custody wallet.**
+> Native Android UQX client architecture plus a production-safe source subset copied from the private production application.
 
-UQX is the native Android community application for the UQX ecosystem. The app combines a recurring participation/rewards experience with referral growth, account transfers, notifications and a separate non-custodial BNB Smart Chain wallet generated directly on the user's device.
+UQX is the consumer/community application for the UQX ecosystem. It combines server-accounted engagement rewards and referrals with a separate on-device self-custody BNB Smart Chain wallet.
 
-The production application is written with **Kotlin + Jetpack Compose** and uses a Python API backend for account/reward services while keeping self-custody wallet secrets on-device.
+**Production stack:** Kotlin + Jetpack Compose  
+**Private production repository:** `uqxnative-fruntend`  
+**Public repository:** selected production-safe source + architecture/security documentation  
+**BNB contracts/evidence source of truth:** [`uqx-bnb-contracts-overview`](https://github.com/umarae-dev/uqx-bnb-contracts-overview)
 
----
+## Reviewer start here
 
-## Product model
+The strongest evidence in this repository is not the product description. It is the production-derived source under [`production-safe/android/`](production-safe/android/) and its exact lineage in [`SOURCE_MANIFEST.md`](SOURCE_MANIFEST.md).
 
-UQX deliberately separates two different value surfaces that are often confusing in token apps:
+Published production-safe modules include:
+
+- `UqxWalletCrypto.kt` — real BIP39/BIP32/secp256k1 EVM wallet generation;
+- `UqxWalletStore.kt` — Android Keystore-backed encrypted mnemonic/private-key storage;
+- `TokenStore.kt` — encrypted auth-token storage with recovery from corrupted/restored auth preferences without touching wallet storage;
+- `BiometricAuth.kt` — production-derived device biometric/PIN gate for sensitive wallet actions;
+- `backup_rules.xml` — legacy Android backup exclusions for encrypted auth/wallet preferences;
+- `data_extraction_rules.xml` — cloud-backup and device-transfer exclusions for those encrypted preference stores.
+
+The complete commercial Android source tree remains private because it also contains live API wiring, Firebase/Google configuration surfaces, unreleased UI and operational integration that are not required to inspect these wallet/security invariants.
+
+## Account layer vs self-custody wallet
 
 ```text
-UQX App
+UQX Android App
   │
-  ├── Account Layer
+  ├── Account layer (backend-owned state)
   │     ├── engagement reward sessions
   │     ├── referral rewards
-  │     ├── in-app UQX balance
-  │     ├── user-to-user transfers
-  │     └── transaction history
+  │     ├── internal UQX balance
+  │     └── internal user-to-user transfers
   │
-  └── Self-Custody Wallet
+  └── Self-custody wallet (device-owned secrets)
         ├── BIP39 recovery phrase
+        ├── m/44'/60'/0'/0/0 derivation
         ├── secp256k1 EVM keypair
         ├── BNB Smart Chain address
-        ├── direct on-chain UQX balance reads
-        ├── presale / vesting position reads
-        └── receive / explorer / recovery tools
+        └── direct read-only UQX/presale state
 ```
 
-The in-app **Account** balance is a server-accounting surface for rewards and internal transfers.
+These are intentionally different trust models. The account balance is server accounting; the wallet is a real EVM address whose mnemonic/private key are generated and stored on the Android device.
 
-The **Wallet** mode is a real EVM address controlled by a key generated on the Android device. These are intentionally not presented as the same thing.
+## Production wallet cryptography
 
----
+The public `UqxWalletCrypto.kt` is copied from the private production app. It uses:
 
-## BNB Smart Chain-first self-custody wallet
-
-The native wallet uses standard EVM cryptography:
-
-- BIP39 mnemonic generation;
-- 128-bit entropy for a 12-word recovery phrase;
+- 128-bit `SecureRandom` entropy;
+- BIP39 12-word mnemonic generation;
 - BIP32 key derivation;
 - standard EVM path `m/44'/60'/0'/0/0`;
-- secp256k1 private/public key material;
-- standard Ethereum-compatible address format used by BNB Smart Chain.
+- secp256k1 credentials/address generation.
 
-Wallet generation happens locally on the user's device.
+Wallet generation does not require a Zynost/UQX server to create the mnemonic or private key.
 
-```text
-SecureRandom entropy
-      │
-      ▼
-BIP39 recovery phrase
-      │
-      ▼
-BIP32 master key
-      │
-      ▼
-m/44'/60'/0'/0/0
-      │
-      ▼
-secp256k1 keypair
-      │
-      ▼
-BNB Smart Chain address
-```
+## Production wallet storage
 
-The generated recovery phrase and private key are not sent to the UQX/Zynost API as part of wallet creation.
+`UqxWalletStore.kt` stores wallet material in `EncryptedSharedPreferences` using an Android Keystore-backed AES-256-GCM master key. The production-safe source shows the actual stored fields:
 
----
-
-## On-device wallet storage
-
-Wallet secrets are stored through Android's encrypted preference stack backed by an Android Keystore master key.
-
-The production wallet store keeps:
-
-- wallet address;
-- recovery phrase;
-- derived private key;
+- address;
+- mnemonic;
+- private key;
 - last wallet-unlock timestamp.
 
-Sensitive wallet preference files are explicitly excluded from Android cloud backup and device-to-device transfer because the encryption keys are device-bound.
+The public backup/data-extraction rules also show that encrypted auth and wallet preference blobs are excluded from cloud backup and device-to-device transfer because their Android Keystore keys are device-bound.
 
-That creates an important recovery invariant:
+That makes the recovery phrase—not a copied encrypted preferences file—the portable recovery mechanism.
 
-> **The recovery phrase is the user's portable recovery mechanism — not a cloud copy of the encrypted wallet database.**
+## Auth-storage hardening
 
----
+`TokenStore.kt` demonstrates a separate security rule: if encrypted authentication preferences become unreadable after restore/corruption, the app can discard and recreate only the disposable auth store. It deliberately does **not** delete `uqx_wallet_prefs`.
 
-## Recovery phrase protection
+This production fix is useful reviewer evidence because it shows wallet and login state are treated as different security domains.
 
-The native UI adds multiple layers around recovery-phrase access:
+## Device authentication
 
-1. the phrase is shown during wallet creation so the user can back it up;
-2. later phrase reveal requires device authentication where available;
-3. the UI uses an additional verification step before displaying the saved phrase;
-4. after a long wallet inactivity period, the wallet can require the full recovery phrase again before returning to the normal wallet view.
+The published production-derived biometric helper gates sensitive wallet actions behind biometric or device credential authentication where available, with compatibility handling across Android API levels.
 
-These controls are defense-in-depth UX measures around the locally stored secret. They are not presented as a substitute for independent security review.
-
----
+It is defense in depth around a local secret, not a claim that the wallet is immune to device compromise.
 
 ## Direct BNB Chain reads
 
-The wallet's on-chain portfolio does not depend on the rewards backend to invent a balance.
+The private production app also includes a read-only BNB JSON-RPC client that uses `eth_call` to read the user's current UQX token/presale state.
 
-A read-only BNB Smart Chain client performs `eth_call` requests for the user's real address and reads the current:
+That file is deliberately **not duplicated here** because it hardcodes deployed UQX contract addresses. Canonical contract addresses, deployment state and transaction evidence belong in `uqx-bnb-contracts-overview` so reviewers have one source of truth.
 
-- UQX BEP-20 balance;
-- presale purchased amount;
-- claimed amount;
-- currently claimable amount;
-- vested amount / locked position.
-
-The read-only client cannot sign or broadcast a transaction. If BNB Chain/RPC is unreachable, the UI shows an unavailable/offline state rather than replacing the missing chain state with a fake zero.
-
----
-
-## Account layer vs. wallet layer
-
-| Capability | UQX Account | Self-Custody Wallet |
-|---|---|---|
-| Reward-session earnings | Yes | No |
-| Referral rewards | Yes | No |
-| User-to-user UQX transfer | Server-accounting flow | Separate on-chain capability/roadmap |
-| Recovery phrase | No | Yes |
-| Private key | No | Device-only |
-| BNB Chain address | Not required | Yes |
-| Direct chain balance | No | Yes |
-| Presale/vesting reads | No | Yes |
-
-This boundary is important for users and reviewers: a custodial/accounting feature should not be mislabeled as a blockchain wallet, and a real self-custody wallet should not silently depend on server custody.
-
----
-
-## Community mining / engagement rewards
-
-The app includes a recurring 24-hour "mining" experience used for community participation and token distribution.
-
-In this product, **mining is an engagement/reward mechanism — not proof-of-work cryptocurrency mining performed by the phone's CPU or GPU.**
-
-A typical flow is:
+The architectural invariant is still clear:
 
 ```text
-User starts reward session
-        │
-        ▼
-Server records active session
-        │
-        ▼
-App displays live countdown / progress
-        │
-        ▼
-Reward becomes account balance
-        │
-        ▼
-History / leaderboard / referral effects update
+Android wallet address
+       │
+       ▼
+BNB Smart Chain read-only RPC
+       │
+       ├── UQX balance
+       ├── presale purchased
+       ├── claimed
+       ├── claimable
+       └── vested/locked state
 ```
 
-This distinction keeps the product terminology understandable without making a false technical claim about consensus mining.
+The read-only client does not sign or broadcast transactions.
 
----
+## Rewards/referrals
 
-## Referral growth system
+The app's 24-hour “mining” surface is an engagement/reward mechanism, not proof-of-work mining performed by the phone CPU/GPU.
 
-The native referral center supports:
+The native client also supports referral install attribution, sharing, network/tier presentation, reward history, notifications, active sessions, authentication and 2FA flows. Those full application modules remain in the private production tree unless a file has been explicitly approved in `SOURCE_MANIFEST.md`.
 
-- unique referral code;
-- referral install link;
-- Play Store install attribution;
-- automatic referral-code recovery after installation where attribution is available;
-- direct social sharing;
-- multi-level network statistics;
-- referral earnings summaries;
-- referred-user activity list;
-- rank/tier progress and speed-bonus presentation.
+## Security boundaries
 
-The Android client uses the Play Install Referrer mechanism rather than requiring the user to manually remember a code after installing the application.
+Public here:
 
-Referral is treated as a distribution layer around the application. Sustainable product utility should remain independent from simply recruiting new participants.
+- selected real production wallet/security source;
+- exact private-source blob lineage;
+- architecture and threat-boundary documentation;
+- CI guard against accidental credential/keystore/config publication.
 
----
+Not public here:
 
-## Native application architecture
+- `google-services.json`;
+- signing keystores;
+- OAuth client secrets;
+- production access tokens;
+- seed phrases/private keys from any real user;
+- private backend configuration;
+- unreleased product code;
+- anti-abuse internals;
+- customer/user data.
 
-The current Android application uses a native Compose navigation structure with top-level surfaces for:
+## CI
 
-- Home / rewards dashboard;
-- Referral Center;
-- Wallet;
-- Notifications;
-- Profile;
-- Leaderboard / history;
-- transaction history;
-- settings;
-- active sessions;
-- 2FA setup and recovery.
+Every push and pull request runs the public-source guard. It checks for forbidden secret-bearing file types/names, obvious credential material, required published source files and valid backup/data-extraction XML.
 
-Guest users can see a read-only dashboard experience, while interactive account actions route to authentication.
+This public subset is intentionally not presented as a standalone full Android application build. The full production Gradle project remains private; the exact production-safe modules published here are independently inspectable and traceable to their private-source blobs.
 
----
+## Production lineage
 
-## Account and device security
+The private native application predates this public release. Public commit dates represent the safe-publication timeline, not the start of UQX product development.
 
-Current client-side security controls include:
-
-- encrypted authentication-token storage;
-- optional biometric/device authentication on app entry;
-- separate device-auth gate for recovery phrase access;
-- TOTP two-factor login flow;
-- 2FA recovery flow;
-- forced minimum-version security update gate;
-- HTTPS-only network configuration;
-- cleartext traffic disabled;
-- sensitive encrypted preferences excluded from backup/transfer;
-- release minification / ProGuard configuration.
-
-The app's forced-update mechanism is designed so a build can be blocked when the backend marks it below the minimum supported security version, while a temporary version-check outage does not automatically lock users out of the app.
-
----
-
-## Network trust boundary
-
-The native app talks to two different classes of systems:
-
-```text
-Android device
-   │
-   ├── HTTPS API ───── account/reward/referral/session services
-   │
-   └── BNB JSON-RPC ─ read-only public chain state
-```
-
-Account data can come from the authenticated backend.
-
-Wallet chain data is read from BNB Smart Chain for the wallet's real EVM address.
-
-Private wallet material remains local to the device in the current wallet-creation/storage design.
-
----
-
-## BNB ecosystem role
-
-UQX gives the wider Zynost ecosystem a consumer/community entry point on BNB Smart Chain:
-
-```text
-Zynost Intelligence
-        │
-        ├──────── Zynost Wallet / execution direction
-        │
-        ├──────── Zynost Pay / merchant payments
-        │
-        └──────── UQX
-                    │
-                    ├── native Android community app
-                    ├── BNB self-custody address
-                    ├── BEP-20 token visibility
-                    ├── presale/vesting visibility
-                    └── referral-driven distribution
-```
-
-UQX should be viewed as the community/reward layer of the broader ecosystem rather than the only product.
-
----
-
-## Technology
-
-- Kotlin
-- Jetpack Compose / Material 3
-- Retrofit + Moshi
-- OkHttp
-- AndroidX Security Crypto
-- Android Keystore-backed encrypted preferences
-- Android Biometric APIs
-- Web3j cryptography
-- Bouncy Castle
-- BIP39 / BIP32 / secp256k1
-- Firebase Cloud Messaging
-- Play Install Referrer
-- BNB Smart Chain JSON-RPC
-
----
-
-## Public vs. private repository boundary
-
-This repository is a **public architecture and product overview**. The production Android source remains private.
-
-### Public here
-
-- product architecture;
-- account-vs-wallet trust boundary;
-- wallet cryptographic standards;
-- high-level security controls;
-- BNB Chain integration model;
-- engagement/reward model;
-- referral architecture;
-- relationship to the wider Zynost ecosystem.
-
-### Kept private
-
-- production application source;
-- internal API implementation;
-- authentication/session implementation details;
-- anti-abuse logic;
-- unreleased wallet features;
-- production operational configuration;
-- user data;
-- private backend endpoints/configuration not needed for public review.
-
-**Never commit a seed phrase, private key, access token, API secret, signing credential or user-private information to this repository.**
-
----
-
-## Security posture
-
-The application already implements meaningful device-side protections, but this repository does **not** claim the wallet is "more secure than MetaMask" or immune to compromise.
-
-Before making comparative security claims, the appropriate evidence would include independent audit results, threat-model review, dependency review, secure-code review, reproducible tests and a responsible disclosure process.
-
-See [`SECURITY.md`](SECURITY.md) for the public security boundary and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the system map.
-
----
+See [`SOURCE_MANIFEST.md`](SOURCE_MANIFEST.md), [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`SECURITY.md`](SECURITY.md).
 
 ## Status
 
-**Active development / live ecosystem integration.**
-
-The current private Android code includes native rewards sessions, referral flows, internal UQX account transfers, notifications, authentication/2FA, and a real on-device BNB Smart Chain wallet with direct UQX/presale state reads.
+The private production app contains native rewards/referral/account flows plus the self-custody BNB wallet. This repository now exposes a meaningful, verifiable production-safe subset instead of being documentation-only.
