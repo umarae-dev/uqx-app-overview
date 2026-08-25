@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Android Keystore keys are not portable across restores. Never back up
+         the encrypted preference blobs that depend on those keys. -->
+    <exclude domain="sharedpref" path="umarae_auth_prefs.xml" />
+    <exclude domain="sharedpref" path="uqx_wallet_prefs.xml" />
+</full-backup-content>
