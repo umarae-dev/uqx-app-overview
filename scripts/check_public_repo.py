@@ -7,7 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_NAMES = {".env", "google-services.json", "local.properties", "keystore.properties"}
 PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    re.compile(r"(?i)(?:client_secret|api[_-]?secret|private[_-]?key)\s*[=:]\s*['\"][^'\"]{12,}['\"]"),
+    # Match likely literal credentials, not harmless identifiers such as
+    # KEY_PRIVATE_KEY = "wallet_private_key" used by encrypted local storage.
+    re.compile(
+        r"(?i)(?:client[_-]?secret|api[_-]?secret|api[_-]?key|access[_-]?token|refresh[_-]?token)"
+        r"\s*[=:]\s*['\"](?!(?:replace|example|placeholder|your[-_]))[^'\"]{16,}['\"]"
+    ),
 ]
 
 errors = []
