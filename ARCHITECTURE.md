@@ -1,90 +1,76 @@
-# UQX Native App — Architecture
+# UQX Native App — Wallet Architecture
 
 ## High-level system
 
 ```text
                      UQX Native Android App
                               │
-              ┌───────────────┴────────────────┐
-              │                                │
-              ▼                                ▼
-       Account / Rewards                 Self-Custody Wallet
-              │                                │
-              │ HTTPS                          │ local cryptography
-              ▼                                ▼
-        UQX API Backend                BIP39 / BIP32 / secp256k1
-              │                                │
-    ┌─────────┼─────────┐                      │
-    │         │         │                      ▼
-    ▼         ▼         ▼                Android Keystore-backed
- Mining    Referral   Account              encrypted storage
- Sessions  Network    Transfers                   │
-    │         │         │                         │
-    └─────────┴─────────┘                         ▼
-              │                           BNB Smart Chain address
-              │                                  │
-              │                                  │ read-only JSON-RPC
-              │                                  ▼
-              │                           UQX / Presale contracts
-              │
-              ▼
-     Notifications / History
+                              ▼
+                     Self-Custody Wallet
+                              │
+              ┌───────────────┼────────────────┐
+              │               │                │
+              ▼               ▼                ▼
+       Local cryptography   Device security   BNB read-only RPC
+              │               │                │
+              ▼               ▼                ▼
+      BIP39 / BIP32 /      Android          UQX token /
+        secp256k1           Keystore          presale state
+              │               │
+              └───────┬───────┘
+                      ▼
+              Device-owned wallet
 ```
 
-## Android client layers
+The current UQX product is the self-custody Web3 wallet layer of the Zynost ecosystem. Older reward/mining/referral surfaces in the wider private repository are legacy implementation material and do not define the current product category.
+
+## Native client layers
 
 ```text
 Jetpack Compose UI
         │
-        ├── Dashboard
-        ├── Referral Center
-        ├── Wallet
+        ├── Wallet-first home
+        ├── UQX Wallet
+        ├── Receive / QR
+        ├── On-chain position
         ├── Notifications
         ├── Profile / Settings
         ├── 2FA / Recovery
-        └── History / Leaderboard
+        └── Active sessions
         │
         ▼
 Client services / stores
         │
-        ├── Retrofit API client
-        ├── encrypted token store
+        ├── BIP39/BIP32 wallet generator
         ├── encrypted wallet store
-        ├── Play Install Referrer
-        ├── Firebase Messaging
+        ├── encrypted auth-token store
+        ├── biometric/device authentication
+        ├── application API client
         └── BNB read-only RPC
 ```
 
 ## Trust boundaries
 
-### Account backend
+### Wallet device boundary
 
-Trusted for:
+The Android device is responsible for:
 
-- reward-session state;
-- referral accounting;
-- authenticated account balance;
-- in-app transfer accounting;
-- notifications and session state.
+- generating the wallet recovery phrase and EVM keypair;
+- storing wallet credentials in Android Keystore-backed encrypted preferences;
+- rendering the recovery phrase for user backup;
+- gating sensitive wallet actions with device authentication where supported.
 
-Not trusted with:
+The recovery phrase is the portable recovery credential. A person who obtains it may be able to restore the wallet on another compatible EVM wallet. Device-side protections are therefore defense in depth, not recovery-phrase compromise immunity.
 
-- wallet mnemonic;
-- wallet private key.
+### Application backend
 
-### Android device
+The application backend may handle account-level services such as authentication, settings, notifications or other connected application state, but it is not the custody authority for the native wallet's mnemonic/private key.
 
-Trusted with:
+### BNB Smart Chain RPC
 
-- local wallet key material;
-- device authentication gate;
-- rendering the recovery phrase to the user.
+The reviewed client uses public chain reads for supported UQX/presale state. RPC unavailability should surface as unavailable/offline state rather than being converted into a false zero balance.
 
-Main risks include device compromise, malicious accessibility/screen capture environments, insecure user backup of the phrase and compromised dependencies. Device-side controls reduce risk but do not eliminate it.
-
-### BNB RPC
-
-Used for read-only public blockchain state. The current read client does not sign transactions. RPC unavailability is surfaced instead of translated into a false zero-balance state.
+The current reviewed BNB client does not establish a public claim of arbitrary transaction signing/broadcasting from the native application.
 
 ## Wallet lifecycle
 
@@ -98,56 +84,52 @@ SecureRandom entropy
 12-word BIP39 mnemonic
     │
     ▼
-EVM key derivation
+BIP32 EVM derivation
     │
     ▼
-Store locally with Keystore-backed encryption
+secp256k1 keypair + address
     │
-    ├── show phrase for backup
+    ▼
+Keystore-backed encrypted local storage
     │
-    └── register/use public address where product workflow requires it
+    ├── recovery-phrase backup
+    └── BNB Smart Chain address
+             │
+             ▼
+      supported on-chain reads
 ```
 
-The portable recovery asset is the mnemonic, not the encrypted preference file.
-
-## Rewards lifecycle
+## On-chain position flow
 
 ```text
-Start session
-    │
-    ▼
-Backend records active period
-    │
-    ▼
-Client renders countdown/progress
-    │
-    ▼
-Backend finalizes reward
-    │
-    ▼
-Account balance/history update
+Device-owned address
+      │
+      ▼
+BNB JSON-RPC eth_call
+      │
+      ├── UQX balance
+      ├── presale purchased
+      ├── presale vested
+      ├── presale locked
+      └── presale claimable
 ```
 
-This is a community/reward mechanism and should not be confused with proof-of-work consensus mining.
+The chain remains the source of truth for these supported on-chain measurements.
 
-## Referral lifecycle
+## Legacy compatibility boundary
 
-```text
-User receives referral code/link
-        │
-        ▼
-Link routes through Play Store
-        │
-        ▼
-Install Referrer attribution
-        │
-        ▼
-Referral relationship recorded by backend
-        │
-        ▼
-Network / tier / reward statistics
-```
+The private production history contains older account/reward/referral/mining routes and UI components. During migration these names may remain in code or APIs so old application/backend contracts are not broken abruptly.
+
+They should not appear as:
+
+- current product positioning;
+- primary navigation;
+- app-store copy;
+- website feature claims;
+- investor/startup-visa product descriptions.
+
+Removal of legacy APIs should be handled as a separate compatibility migration after clients and operational dependencies are confirmed.
 
 ## Public repository policy
 
-This architecture repository intentionally documents interfaces and trust boundaries while leaving live source, production credentials, operational anti-abuse controls and user data private.
+This repository publishes the wallet/security implementation subset and the trust model needed for review while keeping production credentials, user data, signing material and private operational configuration outside public source control.
